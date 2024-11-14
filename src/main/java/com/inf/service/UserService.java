@@ -1,6 +1,9 @@
 package com.inf.service;
 
+import com.inf.dto.AdminProfileDTO;
+import com.inf.dto.ResidentProfileDTO;
 import com.inf.model.AdminProfile;
+import com.inf.model.LoginResponse;
 import com.inf.model.ResidentProfile;
 import com.inf.model.User;
 import com.inf.repository.AdminProfileRepository;
@@ -43,14 +46,18 @@ public class UserService implements UserDetailsService {
             throw new RuntimeException("Username is already taken.");
         }
         user.setPassword(passwordEncoder.encode(user.getPassword()));
-        user.setRole("USER");
+        // Set role based on the input, assuming the frontend provides "ADMIN" or "RESIDENT"
+        if (user.getRole() == null || (!user.getRole().equals("ADMIN") && !user.getRole().equals("RESIDENT"))) {
+            throw new RuntimeException("Invalid role specified.");
+        }
         user.setFirstLogin(true);  // Mark as first login
         userRepository.save(user);
         return "User registered successfully.";
     }
 
     // Authenticate the user and return JWT
-    public String authenticateUser(String username, String password) {
+
+    public LoginResponse authenticateUser(String username, String password) {
         try {
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username, password));
@@ -58,9 +65,10 @@ public class UserService implements UserDetailsService {
             User user = userRepository.findByUsername(username)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            return jwtUtils.generateToken(username, user.getRole());
+            String token = jwtUtils.generateToken(username, user.getRole());
+            return new LoginResponse(token, user.getRole(), user.isFirstLogin());
         } catch (Exception e) {
-            System.out.println("Error during authentication: " + e.getMessage()); // Add more logging here
+            System.out.println("Error during authentication: " + e.getMessage());
             throw new RuntimeException("Invalid username or password.");
         }
     }
@@ -70,24 +78,19 @@ public class UserService implements UserDetailsService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         
-        // Set updated fields (assuming specific fields are being updated)
         user.setFirstLogin(false);  // User has completed their first login setup
         user.setUsername(updatedUser.getUsername());
         user.setRole(updatedUser.getRole());
-        // Add any additional fields to update here
-
         userRepository.save(user);
         return "User profile updated successfully.";
     }
 
     // Load user by username for authentication
-    
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
-        // Don't add "ROLE_" prefix here; Spring Security will handle it
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getUsername())
                 .password(user.getPassword())
@@ -95,25 +98,50 @@ public class UserService implements UserDetailsService {
                 .build();
     }
     
-    public String completeFirstLogin(Long userId, Object profileData) {
+    // Complete first login setup by creating specific profiles based on the role
+
+    public String completeFirstLoginAdmin(Long userId, AdminProfileDTO profileData) {
         User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
-        if (user.isFirstLogin()) {
-            if ("ADMIN".equals(user.getRole())) {
-                AdminProfile adminProfile = (AdminProfile) profileData;
-                adminProfile.setUser(user);
-             adminProfileRepository.save(adminProfile);
-            } else if ("RESIDENT".equals(user.getRole())) {
-                ResidentProfile residentProfile = (ResidentProfile) profileData;
-                residentProfile.setUser(user);
-                residentProfileRepository.save(residentProfile);
-            }
+        
+        if (user.isFirstLogin() && "ADMIN".equals(user.getRole())) {
+            AdminProfile adminProfile = new AdminProfile();
+            adminProfile.setName(profileData.getName());
+            adminProfile.setPhoneNumber(profileData.getPhoneNumber());
+            adminProfile.setSocietyName(profileData.getSocietyName());
+            adminProfile.setSocietyAddress(profileData.getSocietyAddress());
+            adminProfile.setCity(profileData.getCity());
+            adminProfile.setDistrict(profileData.getDistrict());
+            adminProfile.setPostalCode(profileData.getPostalCode());
+            adminProfile.setUser(user);
+
+            adminProfileRepository.save(adminProfile);
             user.setFirstLogin(false);
             userRepository.save(user);
-            return "Profile completed successfully.";
+
+            return "Admin profile completed successfully.";
         }
-        return "User has already completed the first login setup.";
+        throw new RuntimeException("Invalid request or user role.");
     }
+
+    public String completeFirstLoginResident(Long userId, ResidentProfileDTO profileData) {
+        User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (user.isFirstLogin() && "RESIDENT".equals(user.getRole())) {
+            ResidentProfile residentProfile = new ResidentProfile();
+            residentProfile.setName(profileData.getName());
+            residentProfile.setPhoneNumber(profileData.getPhoneNumber());
+            residentProfile.setSocietyName(profileData.getSocietyName());
+            residentProfile.setFlatNumber(profileData.getFlatNumber());
+            residentProfile.setPostalCode(profileData.getPostalCode());
+            residentProfile.setUser(user);
+
+            residentProfileRepository.save(residentProfile);
+            user.setFirstLogin(false);
+            userRepository.save(user);
+
+            return "Resident profile completed successfully.";
+        }
+        throw new RuntimeException("Invalid request or user role.");
+    }
+
 }
-
-
-
